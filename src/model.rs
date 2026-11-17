@@ -228,6 +228,28 @@ pub struct AiContextSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceMetric {
+    pub app_name: String,
+    pub package_name: String,
+    pub avg_cpu_pct: f32,
+    pub peak_cpu_pct: f32,
+    pub peak_memory_bytes: u64,
+    pub samples_count: u64,
+    pub context_tag: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PruneSummary {
+    pub process_events_deleted: u64,
+    pub network_events_deleted: u64,
+    pub file_events_deleted: u64,
+    pub focus_events_deleted: u64,
+    pub total_deleted: u64,
+    pub before_bytes: u64,
+    pub after_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubconsciousReport {
     pub generated_at_us: i64,
     pub timeframe_hours: u32,

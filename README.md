@@ -1,5 +1,9 @@
 # dockN — Pillar 1: The Subconscious
 
+[![dockN CI](https://github.com/bash30ribs/dockN/actions/workflows/ci.yml/badge.svg)](https://github.com/bash30ribs/dockN/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust: 2024](https://img.shields.io/badge/Rust-2024%20Edition-orange.svg)](https://www.rust-lang.org)
+
 > **Personal Analytics with eBPF, Real-Time Focus Tracking & High-Speed Adaptive Telemetry**  
 > *"Most users interact with their system at a high level (`top`, `htop`). To stand out, you must understand your system at the kernel level. This pillar creates a rich, real-time data stream of your digital life—providing the raw material for true personalization."*
 
@@ -58,7 +62,7 @@
                      |  • Deep Work Flow Score  |                      |  • dockn context         |
                      |  • Project Attribution   |                      |  • dockn audit (Thrash)  |
                      |  • Tool Latency Ranking  |                      |  • dockn live (Radar)    |
-                     |  • File Churn Hotspots   |                      |  • dockn timeline        |
+                     |  • File Churn Hotspots   |                      |  • dockn profile         |
                      +--------------------------+                      +--------------------------+
 ```
 
@@ -66,7 +70,7 @@
 
 ## ⚡ Key Capabilities
 
-1. **Dual-Engine Telemetry (Runs on Any OS & Company Setup):**
+1. **Dual-Engine Telemetry (Runs on Any OS & Enterprise Setup):**
    - **Linux eBPF Mode:** Taps directly into kernel execution tracepoints (`sched_process_exec`, `sched_process_exit`, network sockets) with zero performance overhead.
    - **Universal Adaptive Mode:** Runs seamlessly without root privileges on macOS, Windows, Linux, and corporate laptops via high-frequency differential tracking and OS event notifications.
    - **Automatic Detection:** Automatically activates eBPF when available; gracefully falls back to the adaptive engine without crashing.
@@ -80,14 +84,23 @@
    - Dynamically walks parent directory trees to group file mutations, compiler invocations, and focus sessions by repository (`dockN`, `dotfiles`, etc.).
    - Fast, thread-safe LRU caching guarantees zero disk thrashing.
 
-4. **AI Subconscious Synthesis (`dockn context`):**
+4. **Zero-Latency Shell Integration (ZSH & Bash):**
+   - Non-blocking `preexec` and `precmd` hooks record exact terminal commands, exit codes, and millisecond execution durations into SQLite asynchronously.
+
+5. **Resource & System Footprint Profiling (`dockn profile`):**
+   - Tracks peak and average memory footprint and CPU utilization curves per application to expose memory leaks and heavy processes.
+
+6. **Subconscious AI Synthesis (`dockn context`):**
    - Generates an instant, token-dense Markdown summary of what you worked on, modified files, tool bottlenecks, and flow score—ready to feed into LLMs or pipe directly (`dockn context | agy`).
 
-5. **Subconscious Health & Thrashing Anomaly Detector (`dockn audit`):**
+7. **Subconscious Health & Thrashing Anomaly Detector (`dockn audit`):**
    - Detects hidden background disk thrashing (>500 writes/hr), runaway status bar scripts looping tightly, and network reconnect storms.
 
-6. **Interactive Terminal Live Radar (`dockn live`):**
+8. **Interactive Terminal Live Radar (`dockn live`):**
    - Clean, lightweight ANSI terminal dashboard showing real-time focused app, active project, event velocity, and live event ticker.
+
+9. **Smart Data Retention & Compaction (`dockn prune`):**
+   - Automated aging of high-frequency events with SQLite WAL compaction and disk space reclamation.
 
 ---
 
@@ -114,48 +127,60 @@ dockn context --hours 4
 dockn context --hours 4 --json
 ```
 
-### 3. Subconscious Health & Thrashing Audit
+### 3. Resource & System Footprint Profiling
+Inspect peak memory footprints and CPU spikes across applications:
+```bash
+dockn profile --hours 24
+```
+
+### 4. Zero-Latency Shell Integration
+Add exact command execution telemetry to your shell prompt:
+```bash
+# For ZSH (in ~/.zshrc)
+eval "$(dockn hook zsh)"
+
+# For BASH (in ~/.bashrc)
+eval "$(dockn hook bash)"
+```
+
+### 5. Export Subconscious Telemetry (CSV & JSON Lines)
+Export your subconscious dataset for Pandas, DuckDB, Polars, or Jupyter:
+```bash
+# Export process telemetry as CSV
+dockn export --table process_events --format csv --output telemetry.csv
+
+# Export focus timeline as JSONL
+dockn export --table focus_events --format jsonl --output focus.jsonl
+```
+
+### 6. Subconscious Health & Thrashing Audit
 Scan the subconscious database for loop thrashing, rogue scripts, and socket loops:
 ```bash
 dockn audit
 ```
 
-### 4. Project Effort & Churn Breakdown
+### 7. Project Effort & Churn Breakdown
 See exactly how much time and churn went into each project:
 ```bash
 dockn projects
 ```
 
-### 5. Chronological Event Replay Timeline
+### 8. Chronological Event Replay Timeline
 Replay recent window switches and process executions:
 ```bash
 dockn timeline --limit 25
 ```
 
-### 6. Interactive Subconscious Live Radar
+### 9. Interactive Subconscious Live Radar
 Live terminal radar of what the subconscious is sensing right now:
 ```bash
 dockn live
 ```
 
-### 7. Identify Execution Bottlenecks
-Find the slowest compilers, test runs, scripts, and build tasks:
+### 10. Database Pruning & Compaction
+Prune events older than $N$ days and reclaim physical disk space:
 ```bash
-dockn bottlenecks --min-ms 100
-```
-
-### 8. Live Event Stream
-Stream raw microsecond events as they hit the kernel / compositor:
-```bash
-dockn watch
-
-# Filter by focus, process, network, or file events
-dockn watch --filter focus
-```
-
-### 9. Check Database Status
-```bash
-dockn status
+dockn prune --days 14 --vacuum
 ```
 
 ---
@@ -165,6 +190,9 @@ dockn status
 ```bash
 # Compile optimized release binary
 cargo build --release
+
+# Run test suite
+cargo test
 
 # Install to user binary path
 rm -f ~/.local/bin/dockn && cp target/release/dockN ~/.local/bin/dockn

@@ -52,6 +52,57 @@ pub enum Commands {
         hours: u32,
     },
 
+    #[command(about = "Analyze per-application CPU load and peak memory consumption footprints")]
+    Profile {
+        #[arg(long, default_value_t = 24, help = "Time window in hours")]
+        hours: u32,
+    },
+
+    #[command(about = "Prune old telemetry and vacuum database to reclaim disk space")]
+    Prune {
+        #[arg(long, default_value_t = 7, help = "Prune events older than this many days")]
+        days: u32,
+
+        #[arg(long, help = "Execute full SQLite vacuum to shrink database file size on disk")]
+        vacuum: bool,
+    },
+
+    #[command(about = "Export subconscious telemetry to CSV or JSON Lines for external data science")]
+    Export {
+        #[arg(long, default_value = "process_events", help = "Table to export (process_events, network_events, file_events, focus_events)")]
+        table: String,
+
+        #[arg(long, value_enum, default_value_t = ExportFormat::Csv, help = "Export format")]
+        format: ExportFormat,
+
+        #[arg(short, long, help = "File path to save export to (defaults to stdout)")]
+        output: Option<PathBuf>,
+    },
+
+    #[command(about = "Generate shell integration hook (eval \"$(dockn hook zsh)\")")]
+    Hook {
+        #[arg(value_enum, help = "Shell to generate integration script for")]
+        shell: ShellType,
+    },
+
+    #[command(about = "Record a single command execution directly (called by shell hook)")]
+    RecordCmd {
+        #[arg(long)]
+        comm: String,
+
+        #[arg(long)]
+        cmdline: String,
+
+        #[arg(long)]
+        cwd: String,
+
+        #[arg(long, default_value_t = 0)]
+        duration_ms: u64,
+
+        #[arg(long, default_value_t = 0)]
+        exit_code: i32,
+    },
+
     #[command(about = "Deep dive into developer time and file churn grouped by project")]
     Projects {
         #[arg(long, default_value_t = 24, help = "Time window in hours")]
@@ -103,4 +154,16 @@ pub enum EngineChoice {
 pub enum OutputFormat {
     Text,
     Json,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportFormat {
+    Csv,
+    Jsonl,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellType {
+    Zsh,
+    Bash,
 }

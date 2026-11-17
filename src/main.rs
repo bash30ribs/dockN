@@ -8,19 +8,23 @@ mod live;
 mod model;
 mod project;
 mod report;
+mod shell_hook;
 mod storage;
 
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
+use std::fs::File;
+use std::io::{stdout, BufWriter};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 use crate::analytics::AnalyticsEngine;
-use crate::cli::{Cli, Commands, EngineChoice, OutputFormat};
+use crate::cli::{Cli, Commands, EngineChoice, ExportFormat, OutputFormat, ShellType};
 use crate::engine::{EngineManager, EngineType};
 use crate::model::*;
 use crate::report::ReportPrinter;
+use crate::shell_hook::ShellHook;
 use crate::storage::Storage;
 
 #[tokio::main]
@@ -170,6 +174,139 @@ async fn main() -> Result<()> {
                     .bright_black()
             );
             println!();
+        }
+
+        Commands::Profile { hours } => {
+            let storage = Storage::open(&db_path)?;
+            let now_us = chrono::Utc::now().timestamp_micros();
+            let since_us = if hours > 0 {
+                now_us - (hours as i64 * 3600 * 1_000_000)
+            } else {
+                0
+            };
+
+            let profiles = storage.get_resource_profile(since_us)?;
+
+            println!();
+            println!(
+                "{}",
+                "📊 dockN: System Resource & Footprint Profiling"
+                    .bold()
+                    .bright_cyan()
+            );
+            println!(
+                "{}",
+                "────────────────────────────────────────────────────────────────────────────"
+                    .bright_black()
+            );
+
+            if profiles.is_empty() {
+                println!("  {}", "No active resource footprint samples captured yet.".bright_black());
+            } else {
+                println!(
+                    "  {:<26}  {:<16}  {:<10}  {:<10}  {:<12}  {:<8}",
+                    "APPLICATION".bright_black(),
+                    "PACKAGE".bright_black(),
+                    "AVG CPU".bright_black(),
+                    "PEAK CPU".bright_black(),
+                    "PEAK MEMORY".bright_black(),
+                    "SAMPLES".bright_black()
+                );
+
+                for p in profiles {
+                    let mem_str = if p.peak_memory_bytes >= 1024 * 1024 * 1024 {
+                        format!("{:.2} GB", p.peak_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)).bright_red()
+                    } else if p.peak_memory_bytes >= 1024 * 1024 {
+                        format!("{:.1} MB", p.peak_memory_bytes as f64 / (1024.0 * 1024.0)).bright_yellow()
+                    } else {
+                        format!("{} KB", p.peak_memory_bytes / 1024).bright_white()
+                    };
+
+                    println!(
+                        "  {:<26}  {:<16}  {:>7.1}%   {:>7.1}%   {:<12}  {:<8}",
+                        p.app_name.bright_white().bold(),
+                        p.package_name.bright_black(),
+                        p.avg_cpu_pct,
+                        p.peak_cpu_pct,
+                        mem_str,
+                        p.samples_count
+                    );
+                }
+            }
+            println!(
+                "{}",
+                "────────────────────────────────────────────────────────────────────────────"
+                    .bright_black()
+            );
+            println!();
+        }
+
+        Commands::Prune { days, vacuum } => {
+            let storage = Storage::open(&db_path)?;
+            println!(
+                "{}",
+                format!("🧹 Pruning subconscious events older than {} days...", days).bright_cyan()
+            );
+
+            let summary = storage.prune_older_than(days, vacuum)?;
+
+            let before_mb = summary.before_bytes as f64 / (1024.0 * 1024.0);
+            let after_mb = summary.after_bytes as f64 / (1024.0 * 1024.0);
+            let reclaimed_mb = (summary.before_bytes.saturating_sub(summary.after_bytes)) as f64 / (1024.0 * 1024.0);
+
+            println!();
+            println!("{}", "✔ Digital Subconscious database pruning complete!".bright_green().bold());
+            println!("  Total Events Pruned:    {}", summary.total_deleted.to_string().bright_yellow().bold());
+            println!("    - Process Events:     {}", summary.process_events_deleted);
+            println!("    - Network Events:     {}", summary.network_events_deleted);
+            println!("    - File Events:        {}", summary.file_events_deleted);
+            println!("    - Focus Events:       {}", summary.focus_events_deleted);
+            println!("  Database Size Before:   {:.2} MB", before_mb);
+            println!("  Database Size After:    {:.2} MB", after_mb);
+            if vacuum {
+                println!("  Disk Space Reclaimed:   {:.2} MB", reclaimed_mb.to_string().bright_green().bold());
+            } else {
+                println!("  Note: Run with `--vacuum` to immediately shrink physical file size on disk.");
+            }
+            println!();
+        }
+
+        Commands::Export { table, format, output } => {
+            let storage = Storage::open(&db_path)?;
+            let format_str = match format {
+                ExportFormat::Csv => "csv",
+                ExportFormat::Jsonl => "jsonl",
+            };
+
+            let count = if let Some(out_path) = output {
+                let file = File::create(&out_path)?;
+                let mut writer = BufWriter::new(file);
+                let count = storage.export_table(&table, format_str, &mut writer)?;
+                println!(
+                    "{}",
+                    format!("✔ Exported {} records from '{}' to {:?} ({})", count, table, out_path, format_str).bright_green()
+                );
+                count
+            } else {
+                let mut out = stdout();
+                storage.export_table(&table, format_str, &mut out)?
+            };
+
+            if count == 0 {
+                eprintln!("(No records found in table '{}')", table);
+            }
+        }
+
+        Commands::Hook { shell } => {
+            match shell {
+                ShellType::Zsh => println!("{}", ShellHook::zsh()),
+                ShellType::Bash => println!("{}", ShellHook::bash()),
+            }
+        }
+
+        Commands::RecordCmd { comm, cmdline, cwd, duration_ms, exit_code } => {
+            let storage = Storage::open(&db_path)?;
+            storage.record_command(&comm, &cmdline, &cwd, duration_ms, exit_code)?;
         }
 
         Commands::Projects { hours } => {

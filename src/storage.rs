@@ -712,4 +712,177 @@ impl Storage {
         }
         Ok(entries)
     }
+
+    pub fn record_command(
+        &self,
+        comm: &str,
+        cmdline: &str,
+        cwd: &str,
+        duration_ms: u64,
+        exit_code: i32,
+    ) -> Result<()> {
+        let now_us = chrono::Utc::now().timestamp_micros();
+        let app_info = crate::app_name::AppResolver::get().resolve(comm, None, &[]);
+        let project_name = crate::project::ProjectDetector::get().resolve_project_from_path(cwd);
+
+        let conn = self.conn_pool.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO process_events (
+                timestamp_us, event_type, pid, comm, app_name, package_name,
+                cmdline, cwd, duration_ms, exit_code, context_tag, project_name
+            ) VALUES (?1, 'EXIT', 0, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "#,
+            params![
+                now_us,
+                app_info.package_name,
+                app_info.display_name,
+                app_info.package_name,
+                cmdline,
+                cwd,
+                duration_ms as i64,
+                exit_code,
+                app_info.category,
+                project_name,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn prune_older_than(&self, days: u32, vacuum: bool) -> Result<PruneSummary> {
+        let conn = self.conn_pool.lock().unwrap();
+        let cutoff_us = chrono::Utc::now().timestamp_micros() - (days as i64 * 86400 * 1_000_000);
+
+        let before_bytes = std::fs::metadata(&self.db_path).map(|m| m.len()).unwrap_or(0);
+
+        let proc_del: usize = conn.execute("DELETE FROM process_events WHERE timestamp_us < ?1", params![cutoff_us])?;
+        let net_del: usize = conn.execute("DELETE FROM network_events WHERE timestamp_us < ?1", params![cutoff_us])?;
+        let file_del: usize = conn.execute("DELETE FROM file_events WHERE timestamp_us < ?1", params![cutoff_us])?;
+        let focus_del: usize = conn.execute("DELETE FROM focus_events WHERE timestamp_us < ?1", params![cutoff_us])?;
+
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+
+        if vacuum {
+            conn.execute_batch("VACUUM;")?;
+        }
+
+        let after_bytes = std::fs::metadata(&self.db_path).map(|m| m.len()).unwrap_or(0);
+
+        Ok(PruneSummary {
+            process_events_deleted: proc_del as u64,
+            network_events_deleted: net_del as u64,
+            file_events_deleted: file_del as u64,
+            focus_events_deleted: focus_del as u64,
+            total_deleted: (proc_del + net_del + file_del + focus_del) as u64,
+            before_bytes,
+            after_bytes,
+        })
+    }
+
+    pub fn get_resource_profile(&self, since_us: i64) -> Result<Vec<ResourceMetric>> {
+        let conn = self.conn_pool.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT coalesce(app_name, comm) as app,
+                   coalesce(package_name, comm) as pkg,
+                   avg(cpu_pct) as avg_cpu,
+                   max(cpu_pct) as peak_cpu,
+                   max(memory_bytes) as peak_mem,
+                   count(*) as samples,
+                   coalesce(context_tag, 'system') as tag
+            FROM process_events
+            WHERE timestamp_us >= ?1 AND (memory_bytes > 0 OR cpu_pct > 0.0)
+            GROUP BY app
+            ORDER BY peak_mem DESC
+            LIMIT 15
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![since_us], |r| {
+            let app: String = r.get(0)?;
+            let pkg: String = r.get(1)?;
+            let avg_cpu: f64 = r.get(2)?;
+            let peak_cpu: f64 = r.get(3)?;
+            let peak_mem: i64 = r.get(4)?;
+            let samples: i64 = r.get(5)?;
+            let tag: String = r.get(6)?;
+            Ok(ResourceMetric {
+                app_name: app,
+                package_name: pkg,
+                avg_cpu_pct: avg_cpu as f32,
+                peak_cpu_pct: peak_cpu as f32,
+                peak_memory_bytes: peak_mem.max(0) as u64,
+                samples_count: samples as u64,
+                context_tag: tag,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    pub fn export_table(&self, table_name: &str, format: &str, writer: &mut dyn std::io::Write) -> Result<usize> {
+        let conn = self.conn_pool.lock().unwrap();
+        let allowed_tables = ["process_events", "network_events", "file_events", "focus_events"];
+        if !allowed_tables.contains(&table_name) {
+            anyhow::bail!("Invalid table name for export: {}", table_name);
+        }
+
+        let mut stmt = conn.prepare(&format!("SELECT * FROM {} ORDER BY timestamp_us ASC", table_name))?;
+        let col_count = stmt.column_count();
+        let col_names: Vec<String> = stmt.column_names().into_iter().map(|s| s.to_string()).collect();
+
+        let mut count = 0;
+        let mut rows = stmt.query([])?;
+
+        if format == "csv" {
+            writeln!(writer, "{}", col_names.join(","))?;
+            while let Some(row) = rows.next()? {
+                let mut line = Vec::new();
+                for i in 0..col_count {
+                    let val = match row.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => String::new(),
+                        rusqlite::types::ValueRef::Integer(v) => v.to_string(),
+                        rusqlite::types::ValueRef::Real(v) => v.to_string(),
+                        rusqlite::types::ValueRef::Text(v) => {
+                            let s = String::from_utf8_lossy(v);
+                            if s.contains(',') || s.contains('"') || s.contains('\n') {
+                                format!("\"{}\"", s.replace('"', "\"\""))
+                            } else {
+                                s.to_string()
+                            }
+                        }
+                        rusqlite::types::ValueRef::Blob(_) => "<blob>".to_string(),
+                    };
+                    line.push(val);
+                }
+                writeln!(writer, "{}", line.join(","))?;
+                count += 1;
+            }
+        } else {
+            // jsonl format
+            while let Some(row) = rows.next()? {
+                let mut map = serde_json::Map::new();
+                for i in 0..col_count {
+                    let name = col_names[i].clone();
+                    let val = match row.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                        rusqlite::types::ValueRef::Integer(v) => serde_json::Value::from(v),
+                        rusqlite::types::ValueRef::Real(v) => serde_json::Value::from(v),
+                        rusqlite::types::ValueRef::Text(v) => serde_json::Value::from(String::from_utf8_lossy(v).to_string()),
+                        rusqlite::types::ValueRef::Blob(_) => serde_json::Value::from("<blob>"),
+                    };
+                    map.insert(name, val);
+                }
+                writeln!(writer, "{}", serde_json::to_string(&map)?)?;
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
 }

@@ -1,7 +1,14 @@
 [package]
 name = "dockN"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+authors = ["dockN Engineering <bishthrishav@gmail.com>"]
+description = "🧠 Pillar 1: The Subconscious — Personal Analytics with eBPF, Focus Tracking & Kernel Telemetry"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/bash30ribs/dockN"
+keywords = ["ebpf", "telemetry", "analytics", "deep-work", "subconscious"]
+categories = ["command-line-utilities", "development-tools::profiling"]
 
 [dependencies]
 anyhow = "1.0.104"
